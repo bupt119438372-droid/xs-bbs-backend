@@ -5,6 +5,8 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
 import org.springframework.data.redis.cache.RedisCacheConfiguration;
+import org.springframework.data.redis.serializer.GenericJackson2JsonRedisSerializer;
+import org.springframework.data.redis.serializer.RedisSerializationContext;
 
 import java.time.Duration;
 
@@ -14,22 +16,29 @@ public class RedisCacheProfileConfig {
 
     @Bean
     public RedisCacheManagerBuilderCustomizer redisCacheManagerBuilderCustomizer() {
+        RedisCacheConfiguration baseConfig = RedisCacheConfiguration.defaultCacheConfig()
+                // 使用 JSON 序列化缓存值，避免 JDK 序列化要求业务对象实现 Serializable。
+                .serializeValuesWith(
+                        RedisSerializationContext.SerializationPair.fromSerializer(
+                                new GenericJackson2JsonRedisSerializer()
+                        )
+                );
         return builder -> builder
                 .withCacheConfiguration(
                         "userProfile",
-                        RedisCacheConfiguration.defaultCacheConfig().entryTtl(Duration.ofMinutes(30))
+                        baseConfig.entryTtl(Duration.ofMinutes(30))
                 )
                 .withCacheConfiguration(
                         "userList",
-                        RedisCacheConfiguration.defaultCacheConfig().entryTtl(Duration.ofMinutes(10))
+                        baseConfig.entryTtl(Duration.ofMinutes(10))
                 )
                 .withCacheConfiguration(
                         "dailyInsight",
-                        RedisCacheConfiguration.defaultCacheConfig().entryTtl(Duration.ofMinutes(15))
+                        baseConfig.entryTtl(Duration.ofMinutes(15))
                 )
                 .withCacheConfiguration(
                         "notificationUnreadCount",
-                        RedisCacheConfiguration.defaultCacheConfig().entryTtl(Duration.ofMinutes(5))
+                        baseConfig.entryTtl(Duration.ofMinutes(5))
                 );
     }
 }

@@ -1,0 +1,100 @@
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: xs-bbs-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-xsbbs_root_2026}
+      MYSQL_DATABASE: xsbbs
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - xs_bbs_mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${MYSQL_ROOT_PASSWORD:-xsbbs_root_2026}"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+
+  redis:
+    image: redis:7.2
+    container_name: xs-bbs-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - xs_bbs_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  rocketmq-namesrv:
+    image: apache/rocketmq:5.3.2
+    container_name: xs-bbs-rmq-namesrv
+    restart: unless-stopped
+    command: sh mqnamesrv
+
+  rocketmq-broker:
+    image: apache/rocketmq:5.3.2
+    container_name: xs-bbs-rmq-broker
+    restart: unless-stopped
+    depends_on:
+      - rocketmq-namesrv
+    environment:
+      NAMESRV_ADDR: rocketmq-namesrv:9876
+      XS_BBS_RMQ_BROKER_IP: ${XS_BBS_RMQ_BROKER_IP:-rocketmq-broker}
+    volumes:
+      - ./ops/rocketmq/broker.conf.template:/home/rocketmq/rocketmq-5.3.2/conf/broker.conf.template
+    command:
+      - sh
+      - -c
+      - |
+        sed "s/__BROKER_IP1__/$${XS_BBS_RMQ_BROKER_IP:-rocketmq-broker}/" /home/rocketmq/rocketmq-5.3.2/conf/broker.conf.template > /tmp/broker.conf && \
+        sh mqbroker -n rocketmq-namesrv:9876 -c /tmp/broker.conf --enable-proxy
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: xs-bbs-backend
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rocketmq-namesrv:
+        condition: service_started
+      rocketmq-broker:
+        condition: service_started
+    environment:
+      SPRING_PROFILES_ACTIVE: docker,redis,rocketmq
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: ${MYSQL_ROOT_PASSWORD:-xsbbs_root_2026}
+      XS_BBS_DB_HOST: mysql
+      XS_BBS_DB_PORT: 3306
+      XS_BBS_DB_NAME: xsbbs
+      XS_BBS_DB_USERNAME: root
+      XS_BBS_DB_PASSWORD: ${MYSQL_ROOT_PASSWORD:-xsbbs_root_2026}
+      XS_BBS_REDIS_HOST: redis
+      XS_BBS_REDIS_PORT: 6379
+      XS_BBS_RMQ_NAME_SERVER: rocketmq-namesrv:9876
+      XS_BBS_WEB_ALLOWED_ORIGIN_PATTERNS: http://124.220.212.46:*,http://localhost:*,http://127.0.0.1:*,http://192.168.*.*:*
+
+  frontend:
+    build:
+      context: ../xs-bbs-frontend
+      dockerfile: Dockerfile
+    container_name: xs-bbs-frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_started
+    ports:
+      - "80:80"
+
+volumes:
+  xs_bbs_mysql_data:
+  xs_bbs_redis_data:
