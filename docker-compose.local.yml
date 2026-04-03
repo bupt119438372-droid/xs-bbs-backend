@@ -1,0 +1,75 @@
+version: "3.9"
+
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: xs-bbs-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+      MYSQL_DATABASE: xsbbs
+    ports:
+      - "3306:3306"
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - xs_bbs_mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7.2
+    container_name: xs-bbs-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - xs_bbs_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  rocketmq-namesrv:
+    image: apache/rocketmq:5.3.2
+    container_name: xs-bbs-rmq-namesrv
+    restart: unless-stopped
+    ports:
+      - "9876:9876"
+    command: sh mqnamesrv
+
+  rocketmq-broker:
+    image: apache/rocketmq:5.3.2
+    container_name: xs-bbs-rmq-broker
+    restart: unless-stopped
+    depends_on:
+      - rocketmq-namesrv
+    ports:
+      - "10911:10911"
+      - "10909:10909"
+    environment:
+      NAMESRV_ADDR: rocketmq-namesrv:9876
+      XS_BBS_RMQ_BROKER_IP: ${XS_BBS_RMQ_BROKER_IP:-127.0.0.1}
+    volumes:
+      - ./ops/rocketmq/broker.conf.template:/home/rocketmq/rocketmq-5.3.2/conf/broker.conf.template
+    command:
+      - sh
+      - -c
+      - |
+        sed "s/__BROKER_IP1__/${XS_BBS_RMQ_BROKER_IP}/" /home/rocketmq/rocketmq-5.3.2/conf/broker.conf.template > /tmp/broker.conf && \
+        sh mqbroker -n rocketmq-namesrv:9876 -c /tmp/broker.conf --enable-proxy
+    healthcheck:
+      test: ["CMD-SHELL", "mqadmin clusterList -n rocketmq-namesrv:9876 >/tmp/clusterList.log 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+
+volumes:
+  xs_bbs_mysql_data:
+  xs_bbs_redis_data:
